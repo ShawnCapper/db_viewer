@@ -1,103 +1,128 @@
-import Image from "next/image";
+'use client';
+
+import { useState, useEffect } from 'react';
+import { SidebarNavigation } from '@/components/SidebarNavigation';
+import { TopHeader } from '@/components/TopHeader';
+import { DataTableViewer } from '@/components/DataTableViewer';
+import { SqlQueryInterface } from '@/components/SqlQueryInterface';
+import { clientDatabaseManager } from '@/lib/client-database';
+
+type CurrentView = 'data' | 'query';
 
 export default function Home() {
-  return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [selectedTable, setSelectedTable] = useState<string | null>(null);
+  const [selectedDatabase, setSelectedDatabase] = useState<string | null>(null);
+  const [currentView, setCurrentView] = useState<CurrentView>('data');
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  useEffect(() => {
+    // Initialize database manager and restore databases
+    initializeDatabaseManager();
+  }, []);
+
+  const initializeDatabaseManager = async () => {
+    try {
+      // Initialize the database manager (this will restore databases from IndexedDB)
+      await clientDatabaseManager.initialize();
+      
+      // Check if there's a current database after restoration
+      const currentDatabaseId = clientDatabaseManager.getCurrentDatabaseId();
+      if (currentDatabaseId) {
+        setSelectedDatabase(currentDatabaseId);
+      }
+    } catch (error) {
+      console.error('Error initializing database manager:', error);
+    }
+  };
+
+  const handleDatabaseSelect = (databaseId: string) => {
+    if (!databaseId) {
+      setSelectedDatabase(null);
+      setSelectedTable(null);
+      return;
+    }
+
+    try {
+      clientDatabaseManager.setCurrentDatabase(databaseId);
+      setSelectedDatabase(databaseId);
+      setSelectedTable(null); // Reset table selection when database changes
+    } catch (error) {
+      console.error('Error selecting database:', error);
+    }
+  };
+
+  const handleTableSelect = (tableName: string) => {
+    setSelectedTable(tableName);
+    // Auto-switch to data view when selecting a table if not already there
+    if (currentView !== 'data') {
+      setCurrentView('data');
+    }
+  };
+
+
+
+  const renderMainContent = () => {
+    // Show welcome message if no database selected
+    if (!selectedDatabase) {
+      return (
+        <div className="flex items-center justify-center h-full">
+          <div className="text-center space-y-4">
+            <h2 className="text-2xl font-semibold">Welcome to Database Viewer</h2>
+            <p className="text-muted-foreground">
+              Select a database from the sidebar or upload a new one to get started.
+            </p>
+          </div>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
+      );
+    }
+
+        // Show appropriate view based on current selection
+    switch (currentView) {
+      case 'data':
+        return (
+          <DataTableViewer 
+            tableName={selectedTable} 
+            selectedDatabase={selectedDatabase}
+            onTableSelect={handleTableSelect}
           />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
+        );
+      case 'query':
+        return <SqlQueryInterface />;
+      default:
+        return (
+          <DataTableViewer 
+            tableName={selectedTable}
+            selectedDatabase={selectedDatabase}
+            onTableSelect={handleTableSelect}
           />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+        );
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-background flex flex-col">
+      {/* Top Header */}
+      <TopHeader
+        selectedDatabase={selectedDatabase}
+        selectedTable={selectedTable}
+        currentView={currentView}
+        onViewChange={setCurrentView}
+      />
+      
+      {/* Main Layout */}
+      <div className="flex-1 flex">
+        {/* Left Sidebar */}
+        <SidebarNavigation
+          selectedDatabase={selectedDatabase}
+          selectedTable={selectedTable}
+          onDatabaseSelect={handleDatabaseSelect}
+          onTableSelect={handleTableSelect}
+        />
+        
+        {/* Main Content Area */}
+        <main className="flex-1 overflow-hidden">
+          {renderMainContent()}
+        </main>
+      </div>
     </div>
   );
 }
