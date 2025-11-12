@@ -6,6 +6,9 @@ const nextConfig: NextConfig = {
   // Configure for static export (fully client-side)
   output: 'export',
   
+  // GitHub Pages deployment requires basePath when not using custom domain
+  basePath: '/db_viewer',
+  
   // Force Next to treat this folder as the root for file tracing in a multi-lockfile workspace
   outputFileTracingRoot: path.join(__dirname),
   webpack: (config: any) => {
