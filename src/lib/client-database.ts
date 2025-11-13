@@ -77,9 +77,13 @@ class ClientDatabaseManager {
     if (this.initialized) return;
 
     try {
-      // Initialize sql.js
+      // Initialize sql.js with proper WASM file location
       this.sql = await initSqlJs({
-        locateFile: (_file: string) => `/sql-wasm.wasm`
+        locateFile: (file: string) => {
+          // Use absolute path from public directory
+          const basePath = typeof window !== 'undefined' ? window.location.origin : '';
+          return `${basePath}/sql-wasm.wasm`;
+        }
       });
 
       // Initialize IndexedDB
