@@ -1,0 +1,374 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  --radius: 0.375rem;
+  /* Supabase Dark Theme Colors */
+  --background: #0f0f0f;
+  --foreground: #f8f9fa;
+  --card: #1a1a1a;
+  --card-foreground: #f8f9fa;
+  --popover: #1a1a1a;
+  --popover-foreground: #f8f9fa;
+  --primary: #3ecf8e;
+  --primary-foreground: #0f0f0f;
+  --secondary: #262626;
+  --secondary-foreground: #f8f9fa;
+  --muted: #1e1e1e;
+  --muted-foreground: #a1a1aa;
+  --accent: #3ecf8e;
+  --accent-foreground: #0f0f0f;
+  --destructive: #ef4444;
+  --destructive-foreground: #f8f9fa;
+  --border: #2a2a2a;
+  --input: #1a1a1a;
+  --ring: #3ecf8e;
+  --success: #10b981;
+  --warning: #f59e0b;
+  --info: #3b82f6;
+  /* Sidebar specific colors */
+  --sidebar: #141414;
+  --sidebar-foreground: #e5e7eb;
+  --sidebar-primary: #3ecf8e;
+  --sidebar-primary-foreground: #0a0a0a;
+  --sidebar-accent: #1f1f1f;
+  --sidebar-accent-foreground: #f3f4f6;
+  --sidebar-border: #2d2d2d;
+  --sidebar-ring: #3ecf8e;
+  --sidebar-header: #0a0a0a;
+  --sidebar-muted: #9ca3af;
+  /* Table specific colors */
+  --table-header: #1e1e1e;
+  --table-row: #1a1a1a;
+  --table-row-hover: #262626;
+  --table-border: #2a2a2a;
+}
+
+.dark {
+  --background: #0f0f0f;
+  --foreground: #f8f9fa;
+  --card: #1a1a1a;
+  --card-foreground: #f8f9fa;
+  --popover: #1a1a1a;
+  --popover-foreground: #f8f9fa;
+  --primary: #3ecf8e;
+  --primary-foreground: #0f0f0f;
+  --secondary: #262626;
+  --secondary-foreground: #f8f9fa;
+  --muted: #1e1e1e;
+  --muted-foreground: #a1a1aa;
+  --accent: #3ecf8e;
+  --accent-foreground: #0f0f0f;
+  --destructive: #ef4444;
+  --destructive-foreground: #f8f9fa;
+  --border: #2a2a2a;
+  --input: #1a1a1a;
+  --ring: #3ecf8e;
+  --success: #10b981;
+  --warning: #f59e0b;
+  --info: #3b82f6;
+  --sidebar: #141414;
+  --sidebar-foreground: #e5e7eb;
+  --sidebar-primary: #3ecf8e;
+  --sidebar-primary-foreground: #0a0a0a;
+  --sidebar-accent: #1f1f1f;
+  --sidebar-accent-foreground: #f3f4f6;
+  --sidebar-border: #2d2d2d;
+  --sidebar-ring: #3ecf8e;
+  --sidebar-header: #0a0a0a;
+  --sidebar-muted: #9ca3af;
+  --table-header: #1e1e1e;
+  --table-row: #1a1a1a;
+  --table-row-hover: #262626;
+  --table-border: #2a2a2a;
+}
+
+@layer base {
+  * {
+    border-color: hsl(var(--border));
+  }
+  
+  html {
+    height: 100%;
+    scroll-behavior: smooth;
+  }
+  
+  body {
+    height: 100%;
+    background-color: var(--background);
+    color: var(--foreground);
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+/* Custom Supabase-like styles */
+.supabase-table {
+  background-color: var(--table-row);
+  border: 1px solid var(--table-border);
+}
+
+.supabase-table th {
+  background-color: var(--table-header);
+  border-bottom: 1px solid var(--table-border);
+  font-weight: 500;
+}
+
+.supabase-table td {
+  border-bottom: 1px solid var(--table-border);
+}
+
+.supabase-table tr:hover {
+  background-color: var(--table-row-hover);
+}
+
+.sidebar-nav {
+  background-color: var(--sidebar);
+  border-right: 1px solid var(--sidebar-border);
+}
+
+.sidebar-nav-header {
+  background-color: var(--sidebar-header);
+  border-bottom: 1px solid var(--sidebar-border);
+}
+
+.sidebar-nav-item {
+  color: var(--sidebar-foreground);
+  transition: all 0.15s ease-in-out;
+  border: 1px solid transparent;
+}
+
+.sidebar-nav-item:hover {
+  background-color: var(--sidebar-accent);
+  color: var(--sidebar-accent-foreground);
+  border-color: var(--sidebar-border);
+}
+
+.sidebar-nav-item.active {
+  background-color: var(--sidebar-primary);
+  color: var(--sidebar-primary-foreground);
+  font-weight: 500;
+  border-color: var(--sidebar-primary);
+  box-shadow: 0 0 0 1px var(--sidebar-primary);
+}
+
+.sidebar-section-title {
+  color: var(--sidebar-muted);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.top-header {
+  background-color: var(--card);
+  border-bottom: 1px solid var(--border);
+}
+
+/* Custom scrollbar for dark theme */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--muted);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--muted-foreground);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--foreground);
+}
+
+/* Column resize handle styles */
+.table-resize-handle {
+  position: absolute;
+  right: -2px;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  cursor: col-resize;
+  background: transparent;
+  transition: background-color 0.2s ease;
+  z-index: 1;
+}
+
+.table-resize-handle:hover {
+  background-color: var(--primary);
+  opacity: 0.7;
+}
+
+.table-resize-handle:active {
+  background-color: var(--primary);
+  opacity: 1;
+}
+
+/* Prevent text selection during resize */
+.resizing {
+  user-select: none;
+  cursor: col-resize;
+}
+
+/* Table container scrolling */
+.table-container {
+  overflow-x: auto;
+  overflow-y: auto;
+}
+
+.table-container::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+
+.table-container::-webkit-scrollbar-track {
+  background: var(--muted);
+}
+
+.table-container::-webkit-scrollbar-thumb {
+  background: var(--muted-foreground);
+  border-radius: 4px;
+}
+
+.table-container::-webkit-scrollbar-thumb:hover {
+  background: var(--foreground);
+}
+
+/* Table container with sticky header and footer */
+.scrollable-table-container {
+  height: 100%;
+  max-height: calc(100vh - 200px); /* Adjust based on your layout */
+  overflow: auto; /* Both horizontal and vertical scrolling on the container */
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.scrollable-table-wrapper {
+  min-width: max-content; /* Ensures wrapper expands with table width */
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.scrollable-table {
+  width: 100%;
+  table-layout: auto;
+  border-collapse: separate;
+  border-spacing: 0;
+  position: relative;
+}
+
+/* Sticky table header */
+.scrollable-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.scrollable-table thead th {
+  background-color: var(--table-header);
+  border-bottom: 2px solid var(--table-border);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+/* Sticky table footer for pagination */
+.table-footer-sticky {
+  position: sticky;
+  bottom: 0;
+  z-index: 30;
+  background-color: var(--card);
+  border-top: 2px solid var(--border);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.1);
+  margin-top: auto;
+  width: 100%;
+}
+
+/* Inner content wrapper for footer - matches table width */
+.table-footer-content {
+  width: 100%;
+  padding: 0;
+}
+
+/* Sticky column styles */
+.sticky-column-header {
+  position: sticky;
+  left: 0;
+  z-index: 25;
+  background-color: var(--table-header);
+  border-right: 2px solid var(--primary);
+  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.1);
+}
+
+.sticky-column-cell {
+  position: sticky;
+  left: 0;
+  z-index: 15;
+  background-color: var(--background);
+  border-right: 2px solid var(--primary);
+  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.05);
+}
+
+/* Ensure sticky column maintains background during hover */
+tr:hover .sticky-column-cell {
+  background-color: var(--table-row-hover);
+}
+
+/* Dark mode adjustments for sticky columns */
+.dark .sticky-column-header {
+  background-color: var(--table-header);
+  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.3);
+}
+
+.dark .sticky-column-cell {
+  background-color: var(--background);
+  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.2);
+}
