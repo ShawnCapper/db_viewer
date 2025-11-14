@@ -282,19 +282,18 @@
 .scrollable-table-container {
   height: 100%;
   max-height: calc(100vh - 200px); /* Adjust based on your layout */
-  overflow-y: auto;
-  overflow-x: auto;
+  overflow: auto; /* Both horizontal and vertical scrolling on the container */
   position: relative;
   border: 1px solid var(--border);
   border-radius: 8px;
 }
 
 .scrollable-table-wrapper {
-  min-width: 100%;
+  min-width: max-content; /* Ensures wrapper expands with table width */
   position: relative;
   display: flex;
   flex-direction: column;
-  height: 100%;
+  min-height: 100%;
 }
 
 .scrollable-table {
@@ -303,7 +302,6 @@
   border-collapse: separate;
   border-spacing: 0;
   position: relative;
-  flex: 1;
 }
 
 /* Sticky table header */
@@ -321,7 +319,7 @@
   z-index: 20;
 }
 
-/* Sticky table footer for pagination - now participates in horizontal scroll */
+/* Sticky table footer for pagination */
 .table-footer-sticky {
   position: sticky;
   bottom: 0;
@@ -331,7 +329,13 @@
   backdrop-filter: blur(8px);
   box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.1);
   margin-top: auto;
-  min-width: max-content; /* Ensures footer width matches table content width */
+  width: 100%;
+}
+
+/* Inner content wrapper for footer - matches table width */
+.table-footer-content {
+  width: 100%;
+  padding: 0;
 }
 
 /* Sticky column styles */

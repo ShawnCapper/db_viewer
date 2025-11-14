@@ -7,7 +7,8 @@ const nextConfig: NextConfig = {
   output: 'export',
   
   // GitHub Pages deployment requires basePath when not using custom domain
-  basePath: '/db_viewer',
+  // Only use basePath in production (GitHub Pages), not in development
+  basePath: process.env.NODE_ENV === 'production' ? '/db_viewer' : '',
   
   // Force Next to treat this folder as the root for file tracing in a multi-lockfile workspace
   outputFileTracingRoot: path.join(__dirname),

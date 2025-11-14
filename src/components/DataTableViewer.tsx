@@ -14,7 +14,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
-import { ChevronLeft, ChevronRight, Search, RowsIcon, Settings, ArrowUpDown, ArrowUp, ArrowDown, Plus, Pencil, Trash2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Search, RowsIcon, Settings, ArrowUpDown, ArrowUp, ArrowDown, Plus, Pencil, Trash2, Filter, X } from 'lucide-react';
 import { clientDatabaseManager, QueryResult, ColumnInfo } from '@/lib/client-database';
 import { BlobImage } from '@/components/BlobImage';
 import { TableTabs } from '@/components/TableTabs';
@@ -42,6 +42,16 @@ interface FieldState {
   disabled?: boolean;
 }
 
+type FilterOperator = 'equals' | 'in' | 'gt' | 'gte' | 'lt' | 'lte' | 'between' | 'not_null' | 'is_null';
+
+interface ColumnFilter {
+  columnName: string;
+  operator: FilterOperator;
+  values: (string | number | null)[];
+  rangeStart?: number;
+  rangeEnd?: number;
+}
+
 export function DataTableViewer({ tableName, selectedDatabase, onTableSelect }: DataTableViewerProps) {
   const [data, setData] = useState<QueryResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -65,6 +75,16 @@ export function DataTableViewer({ tableName, selectedDatabase, onTableSelect }: 
   const [editingCell, setEditingCell] = useState<{ rowIndex: number; columnName: string } | null>(null);
   const [editValue, setEditValue] = useState<string>('');
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; rowMeta: RowMeta } | null>(null);
+  const [columnHeaderContextMenu, setColumnHeaderContextMenu] = useState<{ x: number; y: number; columnName: string } | null>(null);
+  const [filterDialogOpen, setFilterDialogOpen] = useState(false);
+  const [filteringColumn, setFilteringColumn] = useState<string | null>(null);
+  const [columnDistinctValues, setColumnDistinctValues] = useState<(string | number | null)[]>([]);
+  const [loadingDistinctValues, setLoadingDistinctValues] = useState(false);
+  const [activeFilters, setActiveFilters] = useState<ColumnFilter[]>([]);
+  const [tempFilterOperator, setTempFilterOperator] = useState<FilterOperator>('in');
+  const [tempFilterValues, setTempFilterValues] = useState<Set<string | number | null>>(new Set());
+  const [tempRangeStart, setTempRangeStart] = useState<string>('');
+  const [tempRangeEnd, setTempRangeEnd] = useState<string>('');
   const quoteIdentifier = useCallback((identifier: string) => `"${identifier.replace(/"/g, '""')}"`, []);
 
   useEffect(() => {
@@ -75,7 +95,8 @@ export function DataTableViewer({ tableName, selectedDatabase, onTableSelect }: 
       setSortDirection(null);
       setMultilineColumns(new Set()); // Reset multiline settings
       setStickyColumn(null); // Reset sticky column setting
-      fetchTableData(tableName, 1, '');
+      setActiveFilters([]); // Reset filters
+      fetchTableData(tableName, 1, '', []);
     }
   }, [tableName]);
 
@@ -122,25 +143,97 @@ export function DataTableViewer({ tableName, selectedDatabase, onTableSelect }: 
     }
   }, [data?.columns]);
 
-  const fetchTableData = async (table: string, page: number = currentPage, search: string = searchTerm) => {
+  const fetchTableData = useCallback(async (table: string, page: number = currentPage, search: string = searchTerm, filters: ColumnFilter[] = activeFilters) => {
     setLoading(true);
     try {
       const offset = (page - 1) * itemsPerPage;
       
       let result: QueryResult;
       
-      if (search || (sortColumn && sortDirection)) {
+      if (search || (sortColumn && sortDirection) || filters.length > 0) {
         const safeTable = quoteIdentifier(table);
         const rowIdAlias = quoteIdentifier(INTERNAL_ROWID_COLUMN);
         let query = `SELECT rowid as ${rowIdAlias}, * FROM ${safeTable}`;
 
+        const whereConditions: string[] = [];
+
+        // Add search conditions
         if (search) {
           const escapedSearch = search.replace(/'/g, "''");
           const columns = await clientDatabaseManager.getTableColumns(table);
           const searchConditions = columns
             .map(col => `${quoteIdentifier(col.name)} LIKE '%${escapedSearch}%'`)
             .join(' OR ');
-          query += ` WHERE ${searchConditions}`;
+          whereConditions.push(`(${searchConditions})`);
+        }
+
+        // Add filter conditions
+        if (filters.length > 0) {
+          for (const filter of filters) {
+            const colName = quoteIdentifier(filter.columnName);
+            let filterCondition = '';
+
+            switch (filter.operator) {
+              case 'equals':
+                if (filter.values[0] === null) {
+                  filterCondition = `${colName} IS NULL`;
+                } else {
+                  const escapedValue = typeof filter.values[0] === 'string' 
+                    ? `'${String(filter.values[0]).replace(/'/g, "''")}'` 
+                    : filter.values[0];
+                  filterCondition = `${colName} = ${escapedValue}`;
+                }
+                break;
+              case 'in':
+                if (filter.values.length > 0) {
+                  const nullValues = filter.values.filter(v => v === null);
+                  const nonNullValues = filter.values.filter(v => v !== null);
+                  
+                  const conditions: string[] = [];
+                  if (nonNullValues.length > 0) {
+                    const valuesList = nonNullValues.map(v => 
+                      typeof v === 'string' ? `'${String(v).replace(/'/g, "''")}'` : v
+                    ).join(', ');
+                    conditions.push(`${colName} IN (${valuesList})`);
+                  }
+                  if (nullValues.length > 0) {
+                    conditions.push(`${colName} IS NULL`);
+                  }
+                  
+                  filterCondition = conditions.length > 1 ? `(${conditions.join(' OR ')})` : conditions[0];
+                }
+                break;
+              case 'gt':
+                filterCondition = `${colName} > ${filter.values[0]}`;
+                break;
+              case 'gte':
+                filterCondition = `${colName} >= ${filter.values[0]}`;
+                break;
+              case 'lt':
+                filterCondition = `${colName} < ${filter.values[0]}`;
+                break;
+              case 'lte':
+                filterCondition = `${colName} <= ${filter.values[0]}`;
+                break;
+              case 'between':
+                filterCondition = `${colName} BETWEEN ${filter.rangeStart} AND ${filter.rangeEnd}`;
+                break;
+              case 'is_null':
+                filterCondition = `${colName} IS NULL`;
+                break;
+              case 'not_null':
+                filterCondition = `${colName} IS NOT NULL`;
+                break;
+            }
+
+            if (filterCondition) {
+              whereConditions.push(filterCondition);
+            }
+          }
+        }
+
+        if (whereConditions.length > 0) {
+          query += ` WHERE ${whereConditions.join(' AND ')}`;
         }
 
         if (sortColumn && sortDirection) {
@@ -152,13 +245,8 @@ export function DataTableViewer({ tableName, selectedDatabase, onTableSelect }: 
         result = await clientDatabaseManager.executeQuery(query);
 
         let countQuery = `SELECT COUNT(*) as count FROM ${safeTable}`;
-        if (search) {
-          const escapedSearch = search.replace(/'/g, "''");
-          const columns = await clientDatabaseManager.getTableColumns(table);
-          const searchConditions = columns
-            .map(col => `${quoteIdentifier(col.name)} LIKE '%${escapedSearch}%'`)
-            .join(' OR ');
-          countQuery += ` WHERE ${searchConditions}`;
+        if (whereConditions.length > 0) {
+          countQuery += ` WHERE ${whereConditions.join(' AND ')}`;
         }
         const countResult = await clientDatabaseManager.executeQuery(countQuery);
         const totalCount = countResult.rows[0]?.[0] || 0;
@@ -179,7 +267,7 @@ export function DataTableViewer({ tableName, selectedDatabase, onTableSelect }: 
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentPage, searchTerm, activeFilters, itemsPerPage, sortColumn, sortDirection, quoteIdentifier]);
 
   const displayColumns = useMemo(() => (data?.columns ?? []).filter(col => col !== INTERNAL_ROWID_COLUMN), [data?.columns]);
 
@@ -499,13 +587,136 @@ export function DataTableViewer({ tableName, selectedDatabase, onTableSelect }: 
   useEffect(() => {
     const handleClickOutside = () => {
       setContextMenu(null);
+      setColumnHeaderContextMenu(null);
     };
 
-    if (contextMenu) {
+    if (contextMenu || columnHeaderContextMenu) {
       document.addEventListener('click', handleClickOutside);
       return () => document.removeEventListener('click', handleClickOutside);
     }
-  }, [contextMenu]);
+  }, [contextMenu, columnHeaderContextMenu]);
+
+  const fetchDistinctValues = useCallback(async (columnName: string) => {
+    if (!tableName) return;
+    
+    setLoadingDistinctValues(true);
+    try {
+      const safeTable = quoteIdentifier(tableName);
+      const safeColumn = quoteIdentifier(columnName);
+      
+      // Fetch distinct values (limit to 1000 to prevent memory issues)
+      const query = `SELECT DISTINCT ${safeColumn} FROM ${safeTable} ORDER BY ${safeColumn} LIMIT 1000`;
+      const result = await clientDatabaseManager.executeQuery(query);
+      
+      const distinctValues: (string | number | null)[] = result.rows.map(row => row[0] as string | number | null);
+      setColumnDistinctValues(distinctValues);
+    } catch (error) {
+      console.error('Error fetching distinct values:', error);
+      setColumnDistinctValues([]);
+    } finally {
+      setLoadingDistinctValues(false);
+    }
+  }, [tableName, quoteIdentifier]);
+
+  const openFilterDialog = useCallback((columnName: string) => {
+    setFilteringColumn(columnName);
+    setColumnHeaderContextMenu(null);
+    
+    // Check if there's an existing filter for this column
+    const existingFilter = activeFilters.find(f => f.columnName === columnName);
+    if (existingFilter) {
+      setTempFilterOperator(existingFilter.operator);
+      setTempFilterValues(new Set(existingFilter.values));
+      setTempRangeStart(existingFilter.rangeStart?.toString() || '');
+      setTempRangeEnd(existingFilter.rangeEnd?.toString() || '');
+    } else {
+      // Check if column is numeric to set default operator
+      const column = tableColumns.find(c => c.name === columnName);
+      const isNumeric = column && (column.type?.toUpperCase().includes('INT') || 
+                                   column.type?.toUpperCase().includes('REAL') ||
+                                   column.type?.toUpperCase().includes('NUM'));
+      setTempFilterOperator(isNumeric ? 'gte' : 'in');
+      setTempFilterValues(new Set());
+      setTempRangeStart('');
+      setTempRangeEnd('');
+    }
+    
+    fetchDistinctValues(columnName);
+    setFilterDialogOpen(true);
+  }, [activeFilters, tableColumns, fetchDistinctValues]);
+
+  const applyFilter = useCallback(() => {
+    if (!filteringColumn) return;
+    
+    const newFilter: ColumnFilter = {
+      columnName: filteringColumn,
+      operator: tempFilterOperator,
+      values: Array.from(tempFilterValues),
+    };
+
+    // Add range values for between operator
+    if (tempFilterOperator === 'between') {
+      const start = parseFloat(tempRangeStart);
+      const end = parseFloat(tempRangeEnd);
+      if (!isNaN(start) && !isNaN(end)) {
+        newFilter.rangeStart = start;
+        newFilter.rangeEnd = end;
+      } else {
+        alert('Please enter valid numbers for range');
+        return;
+      }
+    } else if (['gt', 'gte', 'lt', 'lte'].includes(tempFilterOperator)) {
+      const value = parseFloat(tempRangeStart);
+      if (!isNaN(value)) {
+        newFilter.values = [value];
+      } else {
+        alert('Please enter a valid number');
+        return;
+      }
+    }
+
+    // Validate filter has values (except for null checks)
+    if (!['is_null', 'not_null'].includes(tempFilterOperator)) {
+      if (tempFilterOperator === 'in' && tempFilterValues.size === 0) {
+        alert('Please select at least one value');
+        return;
+      }
+      if (['gt', 'gte', 'lt', 'lte'].includes(tempFilterOperator) && newFilter.values.length === 0) {
+        alert('Please enter a value');
+        return;
+      }
+    }
+
+    // Remove existing filter for this column and add new one
+    const updatedFilters = activeFilters.filter(f => f.columnName !== filteringColumn);
+    updatedFilters.push(newFilter);
+    
+    setActiveFilters(updatedFilters);
+    setFilterDialogOpen(false);
+    setFilteringColumn(null);
+    
+    // Refresh data with new filter - pass the updated filters explicitly
+    if (tableName) {
+      fetchTableData(tableName, 1, searchTerm, updatedFilters);
+    }
+  }, [filteringColumn, tempFilterOperator, tempFilterValues, tempRangeStart, tempRangeEnd, activeFilters, tableName, searchTerm, fetchTableData]);
+
+  const removeFilter = useCallback((columnName: string) => {
+    const updatedFilters = activeFilters.filter(f => f.columnName !== columnName);
+    setActiveFilters(updatedFilters);
+    
+    // Refresh data without the filter - pass the updated filters explicitly
+    if (tableName) {
+      fetchTableData(tableName, currentPage, searchTerm, updatedFilters);
+    }
+  }, [activeFilters, tableName, currentPage, searchTerm, fetchTableData]);
+
+  const clearAllFilters = useCallback(() => {
+    setActiveFilters([]);
+    if (tableName) {
+      fetchTableData(tableName, 1, searchTerm, []);
+    }
+  }, [tableName, searchTerm, fetchTableData]);
 
   const handleSearch = () => {
     if (tableName) {
@@ -973,6 +1184,63 @@ export function DataTableViewer({ tableName, selectedDatabase, onTableSelect }: 
         </div>
       </div>
 
+      {/* Active Filters Display */}
+      {activeFilters.length > 0 && (
+        <div className="border-b border-border bg-muted/50 px-4 py-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-medium text-muted-foreground">Active Filters:</span>
+            {activeFilters.map((filter) => {
+              let filterLabel = '';
+              if (filter.operator === 'in' && filter.values.length > 0) {
+                const displayValues = filter.values.slice(0, 3).map(v => v === null ? 'NULL' : String(v)).join(', ');
+                filterLabel = filter.values.length > 3 ? `${displayValues}... (+${filter.values.length - 3})` : displayValues;
+              } else if (filter.operator === 'equals') {
+                filterLabel = `= ${filter.values[0] === null ? 'NULL' : filter.values[0]}`;
+              } else if (filter.operator === 'gt') {
+                filterLabel = `> ${filter.values[0]}`;
+              } else if (filter.operator === 'gte') {
+                filterLabel = `≥ ${filter.values[0]}`;
+              } else if (filter.operator === 'lt') {
+                filterLabel = `< ${filter.values[0]}`;
+              } else if (filter.operator === 'lte') {
+                filterLabel = `≤ ${filter.values[0]}`;
+              } else if (filter.operator === 'between') {
+                filterLabel = `${filter.rangeStart} - ${filter.rangeEnd}`;
+              } else if (filter.operator === 'is_null') {
+                filterLabel = 'IS NULL';
+              } else if (filter.operator === 'not_null') {
+                filterLabel = 'IS NOT NULL';
+              }
+
+              return (
+                <Badge 
+                  key={filter.columnName} 
+                  variant="secondary" 
+                  className="flex items-center gap-1 px-2 py-1"
+                >
+                  <span className="font-medium">{filter.columnName}:</span>
+                  <span>{filterLabel}</span>
+                  <button
+                    onClick={() => removeFilter(filter.columnName)}
+                    className="ml-1 hover:bg-background rounded-full p-0.5"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </Badge>
+              );
+            })}
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              className="h-6 text-xs"
+              onClick={clearAllFilters}
+            >
+              Clear All
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Table Content */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {!tableName ? (
@@ -1003,36 +1271,51 @@ export function DataTableViewer({ tableName, selectedDatabase, onTableSelect }: 
                     <tr>
                       {displayColumns
                         .filter(col => visibleColumns.has(col))
-                        .map((col) => (
-                          <th 
-                            key={col} 
-                            className={`cursor-pointer select-none hover:bg-table-row-hover transition-colors px-4 py-3 text-left border-r border-border relative ${
-                              sortColumn === col ? 'bg-primary/10 text-primary' : ''
-                            } ${
-                              stickyColumn === col ? 'sticky-column-header' : ''
-                            }`}
-                            style={{ 
-                              maxWidth: `${columnWidths[col] || 200}px`
-                            }}
-                            onClick={() => handleColumnSort(col)}
-                          >
-                            <div className="flex items-center gap-2 font-medium pr-2">
-                              {col}
-                              {multilineColumns.has(col) && (
-                                <Badge variant="outline" className="text-xs">
-                                  ML
-                                </Badge>
-                              )}
-                              {stickyColumn === col && (
-                                <Badge variant="secondary" className="text-xs">
-                                  PINNED
-                                </Badge>
-                              )}
-                              {getSortIcon(col)}
-                            </div>
-                            <ResizeHandle columnName={col} />
-                          </th>
-                        ))}
+                        .map((col) => {
+                          const hasFilter = activeFilters.some(f => f.columnName === col);
+                          return (
+                            <th 
+                              key={col} 
+                              className={`cursor-pointer select-none hover:bg-table-row-hover transition-colors px-4 py-3 text-left border-r border-border relative ${
+                                sortColumn === col ? 'bg-primary/10 text-primary' : ''
+                              } ${
+                                hasFilter ? 'bg-blue-50 dark:bg-blue-950' : ''
+                              } ${
+                                stickyColumn === col ? 'sticky-column-header' : ''
+                              }`}
+                              style={{ 
+                                maxWidth: `${columnWidths[col] || 200}px`
+                              }}
+                              onClick={() => handleColumnSort(col)}
+                              onContextMenu={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setColumnHeaderContextMenu({ x: e.clientX, y: e.clientY, columnName: col });
+                              }}
+                            >
+                              <div className="flex items-center gap-2 font-medium pr-2">
+                                {col}
+                                {multilineColumns.has(col) && (
+                                  <Badge variant="outline" className="text-xs">
+                                    ML
+                                  </Badge>
+                                )}
+                                {stickyColumn === col && (
+                                  <Badge variant="secondary" className="text-xs">
+                                    PINNED
+                                  </Badge>
+                                )}
+                                {hasFilter && (
+                                  <Badge variant="default" className="text-xs bg-blue-500">
+                                    <Filter className="h-3 w-3" />
+                                  </Badge>
+                                )}
+                                {getSortIcon(col)}
+                              </div>
+                              <ResizeHandle columnName={col} />
+                            </th>
+                          );
+                        })}
                     </tr>
                   </thead>
                   <tbody>
@@ -1113,51 +1396,53 @@ export function DataTableViewer({ tableName, selectedDatabase, onTableSelect }: 
                 </table>
 
                 {/* Sticky Pagination Footer */}
-                <div className="table-footer-sticky px-4 py-3">
-                  <div className="flex justify-between items-center">
-                    <div className="flex items-center gap-4">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm text-muted-foreground">Rows per page:</span>
-                        <Input
-                          type="number"
-                          min="1"
-                          value={itemsPerPage}
-                          onChange={(e) => handleItemsPerPageChange(e.target.value)}
-                          className="w-16 h-8"
-                        />
+                <div className="table-footer-sticky">
+                  <div className="table-footer-content px-4 py-3">
+                    <div className="flex justify-between items-center">
+                      <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-muted-foreground">Rows per page:</span>
+                          <Input
+                            type="number"
+                            min="1"
+                            value={itemsPerPage}
+                            onChange={(e) => handleItemsPerPageChange(e.target.value)}
+                            className="w-16 h-8"
+                          />
+                        </div>
+                        <span className="text-sm text-muted-foreground whitespace-nowrap">
+                          Showing {Math.min((currentPage - 1) * itemsPerPage + 1, data?.totalCount ?? 0)} to{' '}
+                          {Math.min(currentPage * itemsPerPage, data?.totalCount ?? 0)} of{' '}
+                          {data?.totalCount?.toLocaleString() ?? 0} results
+                        </span>
                       </div>
-                      <span className="text-sm text-muted-foreground">
-                        Showing {Math.min((currentPage - 1) * itemsPerPage + 1, data?.totalCount ?? 0)} to{' '}
-                        {Math.min(currentPage * itemsPerPage, data?.totalCount ?? 0)} of{' '}
-                        {data?.totalCount?.toLocaleString() ?? 0} results
-                      </span>
-                    </div>
-                    
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm text-muted-foreground">
-                        Page {currentPage} of {Math.ceil((data?.totalCount ?? 0) / itemsPerPage)}
-                      </span>
-                      <div className="flex items-center gap-1">
-                        <Button
-                          onClick={handlePreviousPage}
-                          disabled={currentPage === 1}
-                          variant="outline"
-                          size="sm"
-                          className="h-8"
-                        >
-                          <ChevronLeft className="h-4 w-4" />
-                          Previous
-                        </Button>
-                        <Button
-                          onClick={handleNextPage}
-                          disabled={!data || currentPage * itemsPerPage >= (data.totalCount ?? 0)}
-                          variant="outline"
-                          size="sm"
-                          className="h-8"
-                        >
-                          Next
-                          <ChevronRight className="h-4 w-4" />
-                        </Button>
+                      
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-muted-foreground whitespace-nowrap">
+                          Page {currentPage} of {Math.ceil((data?.totalCount ?? 0) / itemsPerPage)}
+                        </span>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            onClick={handlePreviousPage}
+                            disabled={currentPage === 1}
+                            variant="outline"
+                            size="sm"
+                            className="h-8"
+                          >
+                            <ChevronLeft className="h-4 w-4" />
+                            Previous
+                          </Button>
+                          <Button
+                            onClick={handleNextPage}
+                            disabled={!data || currentPage * itemsPerPage >= (data.totalCount ?? 0)}
+                            variant="outline"
+                            size="sm"
+                            className="h-8"
+                          >
+                            Next
+                            <ChevronRight className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -1184,10 +1469,10 @@ export function DataTableViewer({ tableName, selectedDatabase, onTableSelect }: 
 
       {/* Row Editor Dialog */}
       <Dialog open={editorOpen} onOpenChange={setEditorOpen}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+        <DialogContent className="max-w-4xl max-h-[85vh] overflow-x-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle>
-              {editorMode === 'create' ? 'Add New Row' : 'Edit Row'}
+              {editorMode === 'create' ? 'Add New Row' : 'View / Edit Row'}
             </DialogTitle>
           </DialogHeader>
           {editorError && (
@@ -1195,24 +1480,27 @@ export function DataTableViewer({ tableName, selectedDatabase, onTableSelect }: 
               {editorError}
             </div>
           )}
-          <div className="space-y-3">
+          <div className="flex-1 overflow-y-auto overflow-x-hidden space-y-3 pr-2">
             {tableColumns.map((column) => {
               const field = formState[column.name];
               if (!field) return null;
 
+              const value = editorRowMeta?.values[column.name];
               const isMultiline = (column.type?.toUpperCase() ?? '').includes('TEXT') && field.value.length > 50;
 
               return (
-                <div key={column.name} className="space-y-1">
-                  <div className="flex items-center justify-between">
-                    <label className="text-sm font-medium flex items-center gap-2">
-                      {column.name}
-                      {column.pk > 0 && <Badge variant="secondary" className="text-xs">PK</Badge>}
-                      {column.notnull > 0 && <Badge variant="outline" className="text-xs">NOT NULL</Badge>}
-                      <span className="text-xs text-muted-foreground font-normal">({column.type || 'UNKNOWN'})</span>
-                    </label>
+                <div key={column.name} className="border border-border bg-card rounded-lg p-4 space-y-3 min-w-0">
+                  <div className="flex items-start justify-between gap-4 min-w-0">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                        <label className="text-sm font-semibold text-foreground break-words min-w-0">{column.name}</label>
+                        {column.pk > 0 && <Badge variant="secondary" className="text-xs flex-shrink-0">PK</Badge>}
+                        {column.notnull > 0 && <Badge variant="outline" className="text-xs flex-shrink-0">NOT NULL</Badge>}
+                      </div>
+                      <p className="text-xs text-muted-foreground break-words">{column.type || 'UNKNOWN'}</p>
+                    </div>
                     {!field.disabled && (
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-shrink-0">
                         <input
                           type="checkbox"
                           id={`null-${column.name}`}
@@ -1220,39 +1508,83 @@ export function DataTableViewer({ tableName, selectedDatabase, onTableSelect }: 
                           onChange={(e) => toggleFieldNull(column.name, e.target.checked)}
                           className="rounded border-border"
                         />
-                        <label htmlFor={`null-${column.name}`} className="text-xs text-muted-foreground cursor-pointer">
+                        <label htmlFor={`null-${column.name}`} className="text-xs text-foreground cursor-pointer whitespace-nowrap">
                           Set NULL
                         </label>
                       </div>
                     )}
                   </div>
-                  {field.disabled ? (
-                    <div className="px-3 py-2 bg-muted text-muted-foreground text-sm rounded border">
-                      BLOB data cannot be edited here
-                    </div>
-                  ) : isMultiline ? (
-                    <Textarea
-                      value={field.value}
-                      onChange={(e) => updateFieldValue(column.name, e.target.value)}
-                      disabled={field.isNull}
-                      className="min-h-[100px] font-mono text-sm"
-                      placeholder={field.isNull ? 'NULL' : `Enter ${column.name}...`}
-                    />
-                  ) : (
-                    <Input
-                      type="text"
-                      value={field.value}
-                      onChange={(e) => updateFieldValue(column.name, e.target.value)}
-                      disabled={field.isNull}
-                      className="font-mono text-sm"
-                      placeholder={field.isNull ? 'NULL' : `Enter ${column.name}...`}
-                    />
-                  )}
+                  
+                  <div className="min-w-0 overflow-hidden">
+                    {field.disabled ? (
+                      <div className="space-y-2 min-w-0">
+                        <div className="px-3 py-2 bg-muted/50 text-foreground text-sm rounded border border-border">
+                          BLOB data cannot be edited here
+                        </div>
+                        {value instanceof Uint8Array || value instanceof ArrayBuffer ? (
+                          <div className="space-y-2 min-w-0">
+                            <div className="flex items-center gap-2 text-sm text-foreground flex-wrap">
+                              <Badge variant="outline">BINARY DATA</Badge>
+                              <span>{formatBytes(value instanceof ArrayBuffer ? value.byteLength : value.length)}</span>
+                            </div>
+                            {isLikelyImage(value instanceof ArrayBuffer ? new Uint8Array(value) : value) && (
+                              <div className="mt-2 min-w-0">
+                                {(() => {
+                                  const bytes = value instanceof ArrayBuffer ? new Uint8Array(value) : value;
+                                  const base64 = btoa(String.fromCharCode.apply(null, Array.from(bytes)));
+                                  const mimeType = getImageMimeType(bytes);
+                                  const dataUrl = `data:${mimeType};base64,${base64}`;
+                                  return (
+                                    <img 
+                                      src={dataUrl} 
+                                      alt={`${column.name} preview`}
+                                      className="max-w-full max-h-96 object-contain rounded border cursor-pointer hover:opacity-90"
+                                      onClick={() => {
+                                        const newWindow = window.open();
+                                        if (newWindow) {
+                                          newWindow.document.write(`
+                                            <html>
+                                              <head><title>${column.name}</title></head>
+                                              <body style="margin:0;display:flex;justify-content:center;align-items:center;min-height:100vh;background:#000;">
+                                                <img src="${dataUrl}" style="max-width:100%;height:auto;" />
+                                              </body>
+                                            </html>
+                                          `);
+                                        }
+                                      }}
+                                      title="Click to view full size in new window"
+                                    />
+                                  );
+                                })()}
+                              </div>
+                            )}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : isMultiline ? (
+                      <Textarea
+                        value={field.value}
+                        onChange={(e) => updateFieldValue(column.name, e.target.value)}
+                        disabled={field.isNull}
+                        className="min-h-[100px] font-mono text-sm w-full bg-background text-foreground"
+                        placeholder={field.isNull ? 'NULL' : `Enter ${column.name}...`}
+                      />
+                    ) : (
+                      <Input
+                        type="text"
+                        value={field.value}
+                        onChange={(e) => updateFieldValue(column.name, e.target.value)}
+                        disabled={field.isNull}
+                        className="font-mono text-sm w-full bg-background text-foreground"
+                        placeholder={field.isNull ? 'NULL' : `Enter ${column.name}...`}
+                      />
+                    )}
+                  </div>
                 </div>
               );
             })}
           </div>
-          <div className="flex justify-end gap-2 pt-4">
+          <div className="flex justify-end gap-2 pt-4 border-t flex-shrink-0">
             <Button variant="outline" onClick={closeEditorDialog} disabled={actionLoading}>
               Cancel
             </Button>
@@ -1263,13 +1595,24 @@ export function DataTableViewer({ tableName, selectedDatabase, onTableSelect }: 
         </DialogContent>
       </Dialog>
 
-      {/* Right-click Context Menu */}
+      {/* Right-click Context Menu for Rows */}
       {contextMenu && (
         <div
           className="fixed bg-popover border border-border rounded-md shadow-lg py-1 z-50 min-w-[160px]"
           style={{ top: contextMenu.y, left: contextMenu.x }}
           onClick={(e) => e.stopPropagation()}
         >
+          <button
+            className="w-full px-4 py-2 text-left text-sm hover:bg-muted flex items-center gap-2"
+            onClick={() => {
+              openEditorDialog('edit', contextMenu.rowMeta);
+              setContextMenu(null);
+            }}
+          >
+            <Search className="h-4 w-4" />
+            View / Edit Row
+          </button>
+          <div className="border-t border-border my-1"></div>
           <button
             className="w-full px-4 py-2 text-left text-sm hover:bg-muted flex items-center gap-2 text-destructive"
             onClick={() => handleDeleteRow(contextMenu.rowMeta)}
@@ -1280,6 +1623,222 @@ export function DataTableViewer({ tableName, selectedDatabase, onTableSelect }: 
           </button>
         </div>
       )}
+
+      {/* Right-click Context Menu for Column Headers */}
+      {columnHeaderContextMenu && (
+        <div
+          className="fixed bg-popover border border-border rounded-md shadow-lg py-1 z-50 min-w-[180px]"
+          style={{ top: columnHeaderContextMenu.y, left: columnHeaderContextMenu.x }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            className="w-full px-4 py-2 text-left text-sm hover:bg-muted flex items-center gap-2"
+            onClick={() => openFilterDialog(columnHeaderContextMenu.columnName)}
+          >
+            <Filter className="h-4 w-4" />
+            Filter Column
+          </button>
+          {activeFilters.some(f => f.columnName === columnHeaderContextMenu.columnName) && (
+            <button
+              className="w-full px-4 py-2 text-left text-sm hover:bg-muted flex items-center gap-2 text-destructive"
+              onClick={() => {
+                removeFilter(columnHeaderContextMenu.columnName);
+                setColumnHeaderContextMenu(null);
+              }}
+            >
+              <X className="h-4 w-4" />
+              Remove Filter
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Filter Dialog */}
+      <Dialog open={filterDialogOpen} onOpenChange={setFilterDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Filter Column: {filteringColumn}</DialogTitle>
+          </DialogHeader>
+          
+          <div className="flex-1 overflow-y-auto space-y-4">
+            {/* Filter Operator Selection */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Filter Type</label>
+              <div className="grid grid-cols-2 gap-2">
+                {(() => {
+                  const column = tableColumns.find(c => c.name === filteringColumn);
+                  const isNumeric = column && (
+                    column.type?.toUpperCase().includes('INT') || 
+                    column.type?.toUpperCase().includes('REAL') ||
+                    column.type?.toUpperCase().includes('NUM') ||
+                    column.type?.toUpperCase().includes('FLOAT') ||
+                    column.type?.toUpperCase().includes('DOUBLE')
+                  );
+
+                  const operators: { value: FilterOperator; label: string }[] = [
+                    { value: 'in', label: 'Select Values' },
+                    { value: 'is_null', label: 'Is NULL' },
+                    { value: 'not_null', label: 'Is Not NULL' },
+                  ];
+
+                  if (isNumeric) {
+                    operators.push(
+                      { value: 'gt', label: 'Greater Than' },
+                      { value: 'gte', label: 'Greater or Equal' },
+                      { value: 'lt', label: 'Less Than' },
+                      { value: 'lte', label: 'Less or Equal' },
+                      { value: 'between', label: 'Between Range' }
+                    );
+                  }
+
+                  return operators.map(op => (
+                    <Button
+                      key={op.value}
+                      variant={tempFilterOperator === op.value ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setTempFilterOperator(op.value)}
+                      className="justify-start"
+                    >
+                      {op.label}
+                    </Button>
+                  ));
+                })()}
+              </div>
+            </div>
+
+            {/* Filter Value Selection based on operator */}
+            {tempFilterOperator === 'in' && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium">
+                  Select Values {loadingDistinctValues && <span className="text-muted-foreground">(Loading...)</span>}
+                </label>
+                <div className="border border-border rounded-md max-h-80 overflow-y-auto p-2 space-y-1">
+                  {loadingDistinctValues ? (
+                    <div className="flex items-center justify-center py-4">
+                      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+                    </div>
+                  ) : columnDistinctValues.length === 0 ? (
+                    <div className="text-center py-4 text-muted-foreground text-sm">
+                      No values found
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex gap-2 pb-2 border-b mb-2">
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => setTempFilterValues(new Set(columnDistinctValues))}
+                        >
+                          Select All
+                        </Button>
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => setTempFilterValues(new Set())}
+                        >
+                          Clear
+                        </Button>
+                        <span className="text-sm text-muted-foreground self-center ml-auto">
+                          {tempFilterValues.size} selected
+                        </span>
+                      </div>
+                      {columnDistinctValues.map((value, idx) => (
+                        <div key={idx} className="flex items-center space-x-2 p-1 hover:bg-muted rounded">
+                          <input
+                            type="checkbox"
+                            id={`filter-value-${idx}`}
+                            checked={tempFilterValues.has(value)}
+                            onChange={(e) => {
+                              const newSet = new Set(tempFilterValues);
+                              if (e.target.checked) {
+                                newSet.add(value);
+                              } else {
+                                newSet.delete(value);
+                              }
+                              setTempFilterValues(newSet);
+                            }}
+                            className="rounded border-border accent-primary"
+                          />
+                          <label 
+                            htmlFor={`filter-value-${idx}`} 
+                            className="text-sm flex-1 cursor-pointer"
+                          >
+                            {value === null ? <span className="italic text-muted-foreground">NULL</span> : String(value)}
+                          </label>
+                        </div>
+                      ))}
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {['gt', 'gte', 'lt', 'lte'].includes(tempFilterOperator) && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Enter Value</label>
+                <Input
+                  type="number"
+                  value={tempRangeStart}
+                  onChange={(e) => setTempRangeStart(e.target.value)}
+                  placeholder="Enter number"
+                  className="w-full"
+                />
+              </div>
+            )}
+
+            {tempFilterOperator === 'between' && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Range</label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    value={tempRangeStart}
+                    onChange={(e) => setTempRangeStart(e.target.value)}
+                    placeholder="Min"
+                    className="flex-1"
+                  />
+                  <span className="text-sm text-muted-foreground">to</span>
+                  <Input
+                    type="number"
+                    value={tempRangeEnd}
+                    onChange={(e) => setTempRangeEnd(e.target.value)}
+                    placeholder="Max"
+                    className="flex-1"
+                  />
+                </div>
+              </div>
+            )}
+
+            {['is_null', 'not_null'].includes(tempFilterOperator) && (
+              <div className="text-sm text-muted-foreground p-4 bg-muted rounded">
+                This filter will show rows where <span className="font-medium">{filteringColumn}</span> is {tempFilterOperator === 'is_null' ? 'NULL' : 'NOT NULL'}.
+              </div>
+            )}
+
+            {columnDistinctValues.length >= 1000 && tempFilterOperator === 'in' && (
+              <div className="text-xs text-yellow-600 dark:text-yellow-500 p-2 bg-yellow-50 dark:bg-yellow-950 rounded">
+                Note: Only the first 1,000 distinct values are shown. Some values may not appear in this list.
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-2 pt-4 border-t">
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                setFilterDialogOpen(false);
+                setFilteringColumn(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button onClick={applyFilter}>
+              Apply Filter
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
     </div>
   );
 }
